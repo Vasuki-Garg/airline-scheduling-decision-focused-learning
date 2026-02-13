@@ -1,4 +1,4 @@
-# Aircraft Arrival Scheduling: Predict-Then-Optimize + PSO
+# Aircraft Scheduling Optimization: Decision Focused Learning
 
 This repository contains a minimal, runnable implementation of an end-to-end **predict-then-optimize** workflow for an Aircraft Arrival Scheduling Problem (ASP) using **PyEPO** + **Gurobi**, with:
 - Gradient-free decision-focused methods: `blackboxOpt (dbb)` and `negativeIdentity (nid)`
