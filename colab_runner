@@ -1,10 +1,10 @@
 # ============================================================
 # Repo: Vasuki-Garg/airline-scheduling-decision-focused-learning
-# Runs: dbb + nid + PSO (from src/pso.py)
+# Runs: dbb + nid (run_pipeline) + PSO grid search (src/pso.py: run_pso)
 # ============================================================
 
 REPO_URL = "https://github.com/Vasuki-Garg/airline-scheduling-decision-focused-learning.git"
-CSV_PATH = "to_change.csv" 
+CSV_PATH = "traffic_instances_n15_t0.75_all.csv"  
 
 # 1) Install deps
 !pip -q install pyepo gurobipy scipy tabulate scikit-learn torch matplotlib
@@ -23,7 +23,6 @@ if os.path.exists(REPO_DIR):
 
 # 4) Imports
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
@@ -37,7 +36,7 @@ from pyepo.func import blackboxOpt, negativeIdentity
 from src import load_and_clean_csv, build_feature_matrix
 from src.model import ASPmodel
 from src.train_dfo import run_pipeline
-from src.pso import run_pso, run_pso_hpo_for_model 
+from src.pso import run_pso  # <- your existing PSO function
 
 # 5) Load + preprocess
 df = load_and_clean_csv(CSV_PATH, n_rows=500)
@@ -82,7 +81,7 @@ models = {
     "mlp": MLP(inp, 64, out),
 }
 
-# 8) dbb + nid
+# 8) dbb + nid 
 methods = {
     "dbb": blackboxOpt(optmodel, processes=2),
     "nid": negativeIdentity(optmodel, processes=2),
@@ -97,64 +96,86 @@ results, exp_dirs = run_pipeline(
     batch_size=32,
 )
 
-# 9) PSO
+print("\nSaved dbb/nid outputs to:", exp_dirs["base"])
+
+# 9) PSO grid search 
 dataset_train = optDataset(optmodel, x_train, c_train)
 dataset_test  = optDataset(optmodel, x_test,  c_test)
 loader_train  = DataLoader(dataset_train, batch_size=32, shuffle=False)
 loader_test   = DataLoader(dataset_test,  batch_size=32, shuffle=False)
 
 w_values   = [0.4, 0.7, 0.9]
-phi_values = [0.5, 1.5, 2.5]
+phi_values = [0.5, 1.5, 2.5]  # use phi for c1=c2
 pso_configs = [{"num_particles": 10, "max_iters": 10, "w": w, "c1": phi, "c2": phi}
                for w in w_values for phi in phi_values]
+
+def pso_hpo(model_ctor, model_name):
+    best = {"test_regret": float("inf")}
+    all_rows = []
+    for cfg in pso_configs:
+        model = model_ctor()  # fresh init each cfg
+        res = run_pso(
+            model=model,
+            optmodel=optmodel,
+            loader_train=loader_train,
+            num_particles=cfg["num_particles"],
+            max_iters=cfg["max_iters"],
+            w=cfg["w"],
+            c1=cfg["c1"],
+            c2=cfg["c2"],
+            verbose=False
+        )
+
+        with torch.no_grad():
+            test_regret = float(pyepo.metric.regret(model, optmodel, loader_test))
+
+        row = {**cfg,
+               "train_best_regret": float(res.fun),
+               "test_regret": float(test_regret),
+               "elapsed": float(res.elapsed)}
+        all_rows.append(row)
+
+        if test_regret < best["test_regret"]:
+            best = {"cfg": cfg, "res": res, "model": model, "test_regret": test_regret}
+
+    print(f"\n[PSO] Best {model_name}: test_regret={best['test_regret']:.4f}, cfg={best['cfg']}")
+    return best, all_rows
 
 simple_factory = lambda: SimpleRegression(inp, out)
 mlp_factory    = lambda: MLP(inp, 64, out)
 
-best_simple_model, res_simple, cfg_simple, simple_test_regret, simple_all = run_pso_hpo_for_model(
-    model_ctor=simple_factory,
-    model_name="simple_regression",
-    optmodel=optmodel,
-    loader_train=loader_train,
-    loader_test=loader_test,
-    pso_configs=pso_configs
-)
+best_simple, simple_rows = pso_hpo(simple_factory, "simple_regression")
+best_mlp,    mlp_rows    = pso_hpo(mlp_factory,    "mlp")
 
-best_mlp_model, res_mlp, cfg_mlp, mlp_test_regret, mlp_all = run_pso_hpo_for_model(
-    model_ctor=mlp_factory,
-    model_name="mlp",
-    optmodel=optmodel,
-    loader_train=loader_train,
-    loader_test=loader_test,
-    pso_configs=pso_configs
-)
+# 10) Store PSO results 
+results.setdefault("simple_regression", {})
+results.setdefault("mlp", {})
 
 results["simple_regression"]["pso_hpo"] = {
     "model_name": "simple_regression",
     "method_name": "pso_hpo",
-    "loss_log": [float(x) for x in res_simple.history],
-    "loss_log_regret": [float(x) for x in res_simple.history],
-    "elapsed_time": float(res_simple.elapsed),
-    "final_regret": float(simple_test_regret),
-    "hyperparameters": cfg_simple,
+    "loss_log": [float(x) for x in best_simple["res"].history],
+    "loss_log_regret": [float(x) for x in best_simple["res"].history],
+    "elapsed_time": float(best_simple["res"].elapsed),
+    "final_regret": float(best_simple["test_regret"]),
+    "hyperparameters": best_simple["cfg"],
 }
 
 results["mlp"]["pso_hpo"] = {
     "model_name": "mlp",
     "method_name": "pso_hpo",
-    "loss_log": [float(x) for x in res_mlp.history],
-    "loss_log_regret": [float(x) for x in res_mlp.history],
-    "elapsed_time": float(res_mlp.elapsed),
-    "final_regret": float(mlp_test_regret),
-    "hyperparameters": cfg_mlp,
+    "loss_log": [float(x) for x in best_mlp["res"].history],
+    "loss_log_regret": [float(x) for x in best_mlp["res"].history],
+    "elapsed_time": float(best_mlp["res"].elapsed),
+    "final_regret": float(best_mlp["test_regret"]),
+    "hyperparameters": best_mlp["cfg"],
 }
 
-# 10) Summary
-print("\nSaved dbb/nid outputs to:", exp_dirs["base"])
+# 11) Final summary
 print("\n================ SUMMARY ================")
-for mname, md in results.items():
-    print(f"\nModel: {mname}")
-    for method, r in md.items():
-        print(f"  {method:8s}  final_regret={r['final_regret']:.4f}  elapsed={r['elapsed_time']:.1f}s")
+for model_name, md in results.items():
+    print(f"\nModel: {model_name}")
+    for method_name, r in md.items():
+        print(f"  {method_name:8s}  final_regret={r['final_regret']:.4f}  elapsed={r['elapsed_time']:.1f}s")
         if "hyperparameters" in r:
             print("           hyperparams:", r["hyperparameters"])
