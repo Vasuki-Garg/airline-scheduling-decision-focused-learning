@@ -97,7 +97,7 @@ results, exp_dirs = run_pipeline(
     batch_size=32,
 )
 
-# 9) PSO (uses YOUR src/pso.py)
+# 9) PSO
 dataset_train = optDataset(optmodel, x_train, c_train)
 dataset_test  = optDataset(optmodel, x_test,  c_test)
 loader_train  = DataLoader(dataset_train, batch_size=32, shuffle=False)
