@@ -1,3 +1,5 @@
+# This code has been adapted from: https://github.com/harrylui1995/ASP_E2EPO , the official GitHub Repo for Lui, G. N., & Demirel, S. (2025). Gradient-based smart predict-then-optimize framework for aircraft arrival scheduling problem. Journal of Open Aviation Science, 2(2). https://doi.org/10.59490/joas.2024.7891
+
 import ast
 import numpy as np
 import pandas as pd
