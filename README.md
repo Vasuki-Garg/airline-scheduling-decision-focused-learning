@@ -4,7 +4,7 @@ This repository contains a minimal, runnable implementation of an end-to-end **p
 - Gradient-free decision-focused methods: `blackboxOpt (dbb)` and `negativeIdentity (nid)`
 - A simple PSO-based hyperparameter / parameter search baseline
 
-## Credit / Origin
+## Credit
 This code is adapted from the official repository:
 - https://github.com/harrylui1995/ASP_E2EPO
 
